@@ -1,7 +1,3 @@
-import Lean.Parser
-open Lean
-open Lean.Parser
-
 inductive PropLogicExpr where
   | True : PropLogicExpr
   | Var : String -> PropLogicExpr
