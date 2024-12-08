@@ -118,14 +118,28 @@ theorem solve_correct_some :
     simp [solve, solveFor]
     sorry
 
-theorem simplifySplit :
-  simplifyExpr (substAll (.And e1 e2) solns) = .True <-> (simplifyExpr (substAll e1 solns) = .True ∧ simplifyExpr (substAll e2 solns) = .True)
+theorem solutionSplitIff :
+  (∃solns, simplifyExpr (substAll (.And e1 e2) solns) = .True) <-> (∃solns, simplifyExpr (substAll e1 solns) = .True ∧ simplifyExpr (substAll e2 solns) = .True)
     := sorry
 
 theorem subst_soln_var_isSome : ∀n, ∃solns, simplifyExpr (substAll (.Var n) solns) = .True := by
   intro n
   exists [(n, true)]
   simp [subst_one, subst, mkBool, simplifyExpr]
+
+theorem solveFor_not_none : -- maybe pointless
+  ¬(∃solns, simplifyExpr (substAll (.Not e) solns) = mkBool target) -> solveFor target (.Not e) = none := by
+  induction e with
+  | True =>
+    intro solns
+    have false_const : ¬(hasVars PropLogicExpr.True.Not) := by simp [hasVars]
+    simp [false_const, substAll_const, simplifyExpr] at solns
+    cases target with
+    | true => simp [solveFor]
+    | false => contradiction
+  | Var n => sorry
+  | Not e1 ih => sorry
+  | And e1 e2 ih1 ih2 => sorry
 
 theorem solve_correct_none
   : ¬(∃solns, simplifyExpr (substAll expr solns) = .True) -> solve expr = none := by
@@ -148,20 +162,25 @@ theorem solve_correct_none
   | And e1 e2 ih1 ih2 =>
     intro p
     simp [solve, solveFor]
-    simp [simplifySplit] at p
+    rw [solutionSplitIff] at p
     cases h1 : Classical.em $ ∃x, simplifyExpr (substAll e1 x) = .True with
-      | inl q => (
-          cases h2 : Classical.em $ ∃x, simplifyExpr (substAll e2 x) = .True with
-            | inl r => sorry
-            | inr r =>
-              simp [r, solve] at ih2
-              rw [ih2]
-              simp [merge]
-          )
-      | inr q =>
-        simp [q, solve] at ih1
-        rw [ih1]
+    | inl q =>
+      cases h2 : Classical.em $ ∃x, simplifyExpr (substAll e2 x) = .True with
+      | inl r =>
+        obtain ⟨solns1, hsolns1⟩ := q
+        obtain ⟨solns2, hsolns2⟩ := r
+        let merged := merge (some solns1) (some solns2)
+        cases merged with
+        | none => sorry
+        | some solns => sorry
+      | inr r =>
+        simp [r, solve] at ih2
+        rw [ih2]
         simp [merge]
+    | inr q =>
+      simp [q, solve] at ih1
+      rw [ih1]
+      simp [merge]
 
 theorem solve_correctness :
   (¬∃solns, simplifyExpr (substAll expr solns) = .True) -> solve expr = none
