@@ -3,6 +3,7 @@ inductive PropLogicExpr where
   | Var : String -> PropLogicExpr
   | And : PropLogicExpr -> PropLogicExpr -> PropLogicExpr
   | Not : PropLogicExpr -> PropLogicExpr
+deriving BEq
 
 def mkBool (b : Bool) : PropLogicExpr :=
   match b with
@@ -52,28 +53,6 @@ theorem substAll_const : hasVars expr = false -> substAll expr vs = expr := by
     rw [substAll_cons, subst_const, ih]
     exact p
 
-theorem substAll_rec : substAll e ((k, v) :: xs) = subst (substAll e xs) k v := by
-  induction xs with
-    | nil => rfl
-    | cons y ys ih => sorry
-
-theorem subst_not : substAll (.Not e) vs = .Not (substAll e vs) := by
-  induction e with
-  | True =>
-    induction vs with
-      | nil => rfl
-      | cons x xs ih =>
-        have p : hasVars (.Not .True) = false := rfl
-        have q : hasVars .True = false := rfl
-        simp [p, substAll_const, q]
-  | Var n =>
-    have p : hasVars (.Not (.Var n)) = true := rfl
-    induction vs with
-      | nil => rfl
-      | cons x xs ih => sorry
-  | Not e1 ih => sorry
-  | And e1 e2 ih1 ih2 => sorry
-
 private def merge : Option (List (String × Bool)) -> Option (List (String × Bool)) -> Option (List (String × Bool))
   | some [], some ys => some ys
   | some ((n, b) :: xs), some ys =>
@@ -94,33 +73,99 @@ def solve : (expr : PropLogicExpr) -> Option (List (String × Bool)) := solveFor
 def simplifyExpr (expr : PropLogicExpr) : PropLogicExpr :=
   match expr with
     | .True => .True
-    | .And .True .True => .True
-    | .And _ (.Not .True) => .Not .True
-    | .And (.Not .True) _ => .Not .True
-    | .And e1 e2 => .And e1 e2
-    | .Not e1 => .Not e1
     | .Var n => .Var n
+    | .Not e1 => (
+      match simplifyExpr e1 with
+        | .Not e2 => e2
+        | e2 => .Not e2
+    )
+    | .And e1 e2 => (
+      match (simplifyExpr e1, simplifyExpr e2) with
+        | (.True, e2') => e2'
+        | (e1', .True) => e1'
+        | (.Not .True, _) => .Not .True
+        | (_, .Not .True) => .Not .True
+        | (e1', e2') =>
+          if e1' == e2' then e1'
+          else if e1' == .Not e2' || .Not e1' == e2' then .Not .True
+          else .And e1' e2'
+    )
+
+#eval simplifyExpr $ (PropLogicExpr.Var "n").And (.Not .True)
+#eval simplifyExpr $ .Not ((PropLogicExpr.Var "n").And (.Not (.Var "n")))
+#eval simplifyExpr $ .And (.And (.Not .True) .True) (.And (.Not .True) (.Not .True))
+
+def isNeg (e : PropLogicExpr) := ∃e', e = .Not e'
+
+theorem simplifyMinimises : ¬hasVars e -> (simplifyExpr e = .True ∨ simplifyExpr e = .Not .True) := by
+  induction e with
+    | True => simp [simplifyExpr]
+    | Var n => simp [simplifyExpr, hasVars]
+    | Not e ih =>
+      intro const
+      have p : ¬hasVars e := sorry
+      specialize ih p
+      cases ih with
+        | inl h =>
+          have h' : simplifyExpr e = .True -> simplifyExpr (.Not e) = .Not .True := by
+            cases Classical.em $ isNeg e with
+              | inl is_neg =>
+                obtain ⟨e1, eh⟩ := is_neg
+                rw [eh]
+                intro not_e1_eq_true
+                have not_not_def : simplifyExpr e1.Not.Not = simplifyExpr e1 := sorry
+                rw [not_not_def]
+                sorry
+              | inr is_not_neg =>
+                simp [h]
+                have f : simplifyExpr (.Not e) = .Not (simplifyExpr e) := sorry
+                simp [f, h]
+          rw [h']
+          simp
+          exact h
+        | inr => sorry
+
+    | And e1 e2 ih1 ih2 => sorry
 
 #eval solve $ .And (.Var "test") (.Not (.Not $ .Var "test"))
 
-theorem solve_correct_some :
-  ∀solns, solve expr = some solns -> simplifyExpr (substAll expr solns) = .True := by
-  induction expr with
-  | True =>
-    simp [solve, solveFor]
-    simp [subst_nil, simplifyExpr]
-  | Var n =>
-    simp [solve, solveFor, subst_one, subst, mkBool, simplifyExpr]
-  | Not e1 ih =>
-    simp [solve, solveFor]
-    sorry
-  | And e1 e2 ih1 ih2 =>
-    simp [solve, solveFor]
-    sorry
+theorem simplifyDistrib_and : simplifyExpr (.And e1 e2) = simplifyExpr (.And (simplifyExpr e1) (simplifyExpr e2)) := sorry
+
+theorem simplifyAnd (e1 e2 : PropLogicExpr) :
+  simplifyExpr (e1.And e2) = PropLogicExpr.True -> simplifyExpr e1 = .True ∧ simplifyExpr e2 = .True := by
+  intro p
+  cases Classical.em $ simplifyExpr e1 = PropLogicExpr.True ∧ simplifyExpr e2 = PropLogicExpr.True with
+    | inl q =>
+      exact q
+    | inr q =>
+      have q' : ¬simplifyExpr e1 = PropLogicExpr.True ∨ ¬simplifyExpr e2 = PropLogicExpr.True := sorry
+      cases q' with
+       | inl q1 => sorry
+       | inr q1 => sorry
+
+
+theorem distribSubst_and : simplifyExpr (substAll (.And e1 e2) solns) = simplifyExpr (.And (substAll e1 solns) (substAll e2 solns)) := sorry
 
 theorem solutionSplitIff :
-  (∃solns, simplifyExpr (substAll (.And e1 e2) solns) = .True) <-> (∃solns, simplifyExpr (substAll e1 solns) = .True ∧ simplifyExpr (substAll e2 solns) = .True)
-    := sorry
+  (∀solns, simplifyExpr (substAll (.And e1 e2) solns) = .True
+  <-> (simplifyExpr (substAll e1 solns) = .True ∧ simplifyExpr (substAll e2 solns) = .True)) := by
+  intro solns
+  apply Iff.intro
+  intro prem
+  rw [distribSubst_and] at prem
+  exact simplifyAnd (substAll e1 solns) (substAll e2 solns) $ prem
+
+  intro prem
+  rcases prem with ⟨p, q⟩
+  induction solns with
+    | nil =>
+      simp_all [subst_nil]
+      rw [simplifyDistrib_and]
+      simp [p, q]
+      rfl
+    | cons x xs ih =>
+      rw [substAll_cons] at p
+      sorry
 
 theorem subst_soln_var_isSome : ∀n, ∃solns, simplifyExpr (substAll (.Var n) solns) = .True := by
   intro n
@@ -141,48 +186,97 @@ theorem solveFor_not_none : -- maybe pointless
   | Not e1 ih => sorry
   | And e1 e2 ih1 ih2 => sorry
 
-theorem solve_correct_none
-  : ¬(∃solns, simplifyExpr (substAll expr solns) = .True) -> solve expr = none := by
+theorem solveValidSub :
+  ∀solns, solve expr = some solns -> simplifyExpr (substAll expr solns) = .True := by
   induction expr with
   | True =>
+    simp [solve, solveFor]
+    simp [subst_nil, simplifyExpr]
+  | Var n =>
+    simp [solve, solveFor, subst_one, subst, mkBool, simplifyExpr]
+  | Not e1 ih =>
+    simp [solve, solveFor]
+    sorry
+  | And e1 e2 ih1 ih2 =>
+    simp [solve, solveFor]
+    intros solns p
+    simp [solutionSplitIff]
+    have test := ih1 solns
+    sorry
+
+-- iff P has no solutions to make P true, then ¬P
+-- has no solutions to make ¬P false.
+theorem solveFor_not_target :
+  solveFor target e = none <-> solveFor (¬target) (.Not e) = none := sorry
+
+theorem solveNilImpConst : solveFor target e = some [] -> ¬hasVars e := by
+  induction e with
+  | True => cases target <;> simp [solve, solveFor, hasVars]
+  | Var n => simp [solve, solveFor, hasVars]
+  | And e1 e2 ih1 ih2 => sorry
+  | Not e ih => sorry
+
+theorem solveIffSub
+  : (∃solns, simplifyExpr (substAll expr solns) = .True) <-> Option.isSome (solve expr) := by
+  induction expr with
+  | True =>
+    apply Iff.intro
     intro p
     have q : hasVars .True = false := rfl
     have r : ∃solns, substAll .True solns = .True := by simp [q, substAll_const]
     have s : ∃solns, simplifyExpr (substAll .True solns) = .True := sorry
-    contradiction
+    simp [solve, solveFor]
+    have q : hasVars .True = false := rfl
+    simp [solve, solveFor, q, substAll_const, simplifyExpr]
   | Var n =>
-    intro p
-    have p' : ∃solns, simplifyExpr (substAll (.Var n) solns) = .True := by
-      simp [subst_soln_var_isSome]
-    contradiction
-  | Not e ih =>
+    apply Iff.intro
     intro p
     simp [solve, solveFor]
+    simp [subst_soln_var_isSome]
+  | Not e ih =>
+    apply Iff.intro
+    intro p
+    simp [solve, solveFor]
+    -- simplifyExpr (substAll e.Not solns) = .True <-> simplifyExpr (.Not (substAll e solns)) = .True
+    -- ... <-> simplifyExpr (.Not (substAll e solns)) = .True
+    sorry
     sorry
   | And e1 e2 ih1 ih2 =>
+    apply Iff.intro
     intro p
     simp [solve, solveFor]
-    rw [solutionSplitIff] at p
-    cases h1 : Classical.em $ ∃x, simplifyExpr (substAll e1 x) = .True with
-    | inl q =>
-      cases h2 : Classical.em $ ∃x, simplifyExpr (substAll e2 x) = .True with
-      | inl r =>
-        obtain ⟨solns1, hsolns1⟩ := q
-        obtain ⟨solns2, hsolns2⟩ := r
-        let merged := merge (some solns1) (some solns2)
-        cases merged with
-        | none => sorry
-        | some solns => sorry
-      | inr r =>
-        simp [r, solve] at ih2
-        rw [ih2]
-        simp [merge]
-    | inr q =>
-      simp [q, solve] at ih1
-      rw [ih1]
-      simp [merge]
+    cases Classical.em $ ∃solns, simplifyExpr (substAll e1 solns) = PropLogicExpr.True with
+      | inl q =>
+        cases Classical.em $ ∃solns', simplifyExpr (substAll e2 solns') = PropLogicExpr.True with
+          | inl r =>
+            rw [merge]
+            -- intros xs e1Nil e2Some
+            -- simp [solveNilImpConst] at e1Nil
+            sorry
+            sorry
+            sorry
+          | inr r =>
+            rw [merge]
+            -- intros a b c
+            -- simp [r, solve] at ih2
+            -- rw [ih2] at c
+            -- contradiction
+            -- intro n b c ys zz zy
+            -- simp [r, solve] at ih2
+            -- rw [zy] at ih2
+            -- contradiction
+            sorry
+            sorry
+            sorry
+      | inr q =>
+        simp [q, solve] at ih1
+        simp [ih1, merge]
+        sorry
+    sorry
 
-theorem solve_correctness :
-  (¬∃solns, simplifyExpr (substAll expr solns) = .True) -> solve expr = none
-  ∧ (∀solns, solve expr = some solns -> simplifyExpr (substAll expr solns) = .True) := by
-  sorry
+-- `solve` only returns a solution when there exists a valid set of substitutions to solve
+-- the equation, and the solution that `solve` returns is one of these valid sets.
+theorem solveCorrect :
+  ((∃solns, simplifyExpr (substAll expr solns) = .True) <-> Option.isSome (solve expr))
+  ∧ (∀solns, solve expr = some solns -> simplifyExpr (substAll expr solns) = .True) :=
+  And.intro solveIffSub solveValidSub
